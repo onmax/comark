@@ -372,6 +372,7 @@ const isMatch = computed(() => !!formattedOutput.value && formattedOutput.value.
 const markdownEditor = useTemplateRef<{
   scrollToBottom: () => void
   reveal: (span: [number, number]) => void
+  highlight: (span?: [number, number]) => void
 }>('markdownEditor')
 
 // `null` until the first check finishes, so the header doesn't flash "No type errors" while Monaco loads.
@@ -646,6 +647,10 @@ async function handleGenerate(prompt: string) {
                 <button
                   class="flex items-start gap-2 w-full px-3 py-1 text-left text-sm hover:bg-elevated active:bg-accented focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary transition-colors"
                   @click="revealTypeProblem(problem)"
+                  @mouseenter="markdownEditor?.highlight(problem.span)"
+                  @focus="markdownEditor?.highlight(problem.span)"
+                  @mouseleave="markdownEditor?.highlight()"
+                  @blur="markdownEditor?.highlight()"
                 >
                   <UIcon
                     name="i-lucide-circle-x"
@@ -658,7 +663,7 @@ async function handleGenerate(prompt: string) {
                     >
                       <code
                         v-if="part.code"
-                        class="font-mono text-[0.85em] px-1 py-px rounded bg-elevated"
+                        class="font-mono text-[0.85em] px-1 py-px rounded bg-inverted/10"
                         >{{ part.text }}</code
                       >
                       <template v-else>{{ part.text }}</template>

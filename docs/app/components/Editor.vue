@@ -60,6 +60,7 @@ function defineComarkDarkTheme(monaco: any): void {
       'editorSuggestWidget.background': '#0a0a0a',
       'editorSuggestWidget.border': '#171717',
       'editorSuggestWidget.selectedBackground': '#262626',
+      'textCodeBlock.background': '#262626',
       'input.background': '#171717',
       'input.border': '#262626',
       'scrollbarSlider.background': '#26262680',
@@ -87,6 +88,8 @@ onMounted(async () => {
     language: language,
     theme: theme.value,
     automaticLayout: true,
+    // The pane clips its overflow, which would cut hovers and suggestions off at its edge.
+    fixedOverflowWidgets: true,
     readOnly: readOnly,
     minimap: {
       enabled: false,
@@ -125,6 +128,8 @@ onBeforeUnmount(() => {
 // TypeScript worker checks it, and the problems are mapped back as markers.
 const typecheckDisposables: { dispose: () => void }[] = []
 let virtualModel: any = null
+let problemDecorations: any = null
+let highlightDecorations: any = null
 let checkVersion = 0
 
 function startTypecheck(types: Record<string, ComponentTypes>) {
@@ -141,6 +146,8 @@ function startTypecheck(types: Record<string, ComponentTypes>) {
   )
   virtualModel = monaco.editor.createModel('', 'typescript', monaco.Uri.parse('file:///comark-document.ts'))
   typecheckDisposables.push(virtualModel)
+  problemDecorations = editor.createDecorationsCollection()
+  highlightDecorations = editor.createDecorationsCollection()
   check()
 }
 
@@ -158,17 +165,23 @@ async function check() {
 
   const markdownModel = editor.getModel()
   const problems = describeTypeProblems(markdown, mapped, diagnostics, components)
-  monaco.editor.setModelMarkers(
-    markdownModel,
-    'comark',
+  // Decorations rather than markers: a marker's hover is plain text, and a decoration's
+  // is Markdown, so the names and values in each message show as code.
+  problemDecorations.set(
     problems.map((problem) => ({
-      ...toRange(problem.span),
-      severity: monaco.MarkerSeverity.Error,
-      // Markers are plain text, so the backticks that mark code in the list would show as-is.
-      message: problem.message.replace(/`/g, ''),
-      source: 'Comark',
+      range: squiggleRange(problem.span),
+      options: {
+        className: 'squiggly-error',
+        hoverMessage: { value: problem.message },
+        overviewRuler: {
+          color: { id: 'editorOverviewRuler.errorForeground' },
+          position: monaco.editor.OverviewRulerLane.Right,
+        },
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      },
     }))
   )
+  highlightDecorations.clear()
   emit(
     'problems',
     problems.map((problem) => ({ ...problem, line: markdownModel.getPositionAt(problem.span[0]).lineNumber }))
@@ -187,6 +200,18 @@ function toRange([start, end]: Span) {
     endLineNumber: to.lineNumber,
     endColumn: to.column,
   }
+}
+
+// A span with nothing in it, like the props of `::alert` written without any, would draw
+// no squiggle, so it marks the word it touches, as Monaco does for markers.
+function squiggleRange(span: Span) {
+  const range = toRange(span)
+  if (span[0] !== span[1]) return range
+  const model = editor.getModel()
+  const position = model.getPositionAt(span[0])
+  const word = model.getWordAtPosition(position) ?? model.getWordAtPosition(model.getPositionAt(span[0] - 1))
+  if (!word) return { ...range, endColumn: range.startColumn + 1 }
+  return { ...range, startColumn: word.startColumn, endColumn: word.endColumn }
 }
 
 watch(model, (newCode) => {
@@ -222,6 +247,12 @@ defineExpose({
     editor.revealRangeInCenterIfOutsideViewport(range)
     editor.focus()
   },
+  /** Highlights a span of the Markdown, or clears the highlight. */
+  highlight(span?: Span) {
+    highlightDecorations?.set(
+      span ? [{ range: squiggleRange(span), options: { className: 'comark-problem-highlight' } }] : []
+    )
+  },
   scrollToBottom() {
     if (!editor) return
     const lineCount = editor.getModel()?.getLineCount() ?? 1
@@ -248,3 +279,10 @@ defineExpose({
     />
   </div>
 </template>
+
+<style>
+.comark-problem-highlight {
+  background: color-mix(in oklch, var(--ui-error) 30%, transparent);
+  border-radius: 2px;
+}
+</style>

@@ -442,7 +442,7 @@ title: Beach house
 # Beach house
 
 Five mistakes below. Hover a squiggle,
-or open the problem list above the editor.
+or pick one in the Problems panel below.
 
 ::RatingBar{rating="4.8"}
 #title

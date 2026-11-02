@@ -376,10 +376,10 @@ const markdownEditor = useTemplateRef<{
 
 // `null` until the first check finishes, so the header doesn't flash "No type errors" while Monaco loads.
 const typeProblems = ref<(TypeProblem & { line: number })[] | null>(null)
-const typeProblemsOpen = ref(false)
+// Open by default, so a document with mistakes shows them without a click, like an editor's Problems panel.
+const typeProblemsOpen = ref(true)
 
 function revealTypeProblem(problem: TypeProblem) {
-  typeProblemsOpen.value = false
   markdownEditor.value?.reveal(problem.span)
 }
 
@@ -475,66 +475,6 @@ async function handleGenerate(prompt: string) {
             </UTooltip>
 
             <div class="flex-1" />
-
-            <UTooltip
-              v-if="typeProblems && !typeProblems.length"
-              text="Every component, prop, and slot matches its type"
-            >
-              <span class="flex items-center gap-1.5 px-1.5 text-xs text-muted">
-                <UIcon
-                  name="i-lucide-circle-check"
-                  class="size-3.5"
-                />
-                No type errors
-              </span>
-            </UTooltip>
-            <UPopover
-              v-else-if="typeProblems"
-              v-model:open="typeProblemsOpen"
-              :content="{ align: 'end' }"
-              :ui="{ content: 'p-1 w-96 max-h-80 overflow-y-auto' }"
-            >
-              <UButton
-                size="xs"
-                color="error"
-                variant="soft"
-                icon="i-lucide-circle-x"
-                :label="`${typeProblems.length} ${typeProblems.length === 1 ? 'problem' : 'problems'}`"
-              />
-
-              <template #content>
-                <ul aria-label="Type problems">
-                  <li
-                    v-for="problem in typeProblems"
-                    :key="`${problem.span[0]}-${problem.code}`"
-                  >
-                    <button
-                      class="flex items-start gap-2.5 w-full px-2 py-1.5 rounded-md text-left text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary transition-colors"
-                      @click="revealTypeProblem(problem)"
-                    >
-                      <UIcon
-                        name="i-lucide-circle-x"
-                        class="size-4 mt-0.5 shrink-0 text-error"
-                      />
-                      <span class="flex-1 text-pretty">
-                        <template
-                          v-for="(part, index) in messageParts(problem.message)"
-                          :key="index"
-                        >
-                          <code
-                            v-if="part.code"
-                            class="font-mono text-[0.85em] px-1 py-px rounded bg-elevated"
-                            >{{ part.text }}</code
-                          >
-                          <template v-else>{{ part.text }}</template>
-                        </template>
-                      </span>
-                      <span class="shrink-0 mt-0.5 text-xs text-muted tabular-nums">Ln {{ problem.line }}</span>
-                    </button>
-                  </li>
-                </ul>
-              </template>
-            </UPopover>
 
             <UTooltip text="Copy a link to this Markdown">
               <UButton
@@ -670,6 +610,93 @@ async function handleGenerate(prompt: string) {
               floating
               @submit="handleGenerate"
             />
+          </div>
+
+          <section
+            v-if="typeProblemsOpen && typeProblems?.length"
+            aria-label="Problems"
+            class="shrink-0 flex flex-col h-44 border-t border-default bg-default"
+          >
+            <div class="shrink-0 flex items-center gap-2 pl-3 pr-1.5 h-8">
+              <span class="text-xs font-medium uppercase tracking-wider text-toned">Problems</span>
+              <UBadge
+                size="sm"
+                color="neutral"
+                variant="subtle"
+                class="tabular-nums"
+                :label="typeProblems.length"
+              />
+              <div class="flex-1" />
+              <UTooltip text="Close">
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-x"
+                  aria-label="Close problems"
+                  @click="typeProblemsOpen = false"
+                />
+              </UTooltip>
+            </div>
+            <ul class="flex-1 min-h-0 overflow-y-auto pb-1">
+              <li
+                v-for="problem in typeProblems"
+                :key="`${problem.span[0]}-${problem.code}`"
+              >
+                <button
+                  class="flex items-start gap-2 w-full px-3 py-1 text-left text-sm hover:bg-elevated active:bg-accented focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary transition-colors"
+                  @click="revealTypeProblem(problem)"
+                >
+                  <UIcon
+                    name="i-lucide-circle-x"
+                    class="size-4 mt-0.5 shrink-0 text-error"
+                  />
+                  <span class="flex-1 text-pretty">
+                    <template
+                      v-for="(part, index) in messageParts(problem.message)"
+                      :key="index"
+                    >
+                      <code
+                        v-if="part.code"
+                        class="font-mono text-[0.85em] px-1 py-px rounded bg-elevated"
+                        >{{ part.text }}</code
+                      >
+                      <template v-else>{{ part.text }}</template>
+                    </template>
+                  </span>
+                  <span class="shrink-0 mt-0.5 text-xs text-muted tabular-nums">Ln {{ problem.line }}</span>
+                </button>
+              </li>
+            </ul>
+          </section>
+
+          <!-- Status bar -->
+          <div class="shrink-0 flex items-center gap-4 px-2 h-7 border-t border-default bg-default">
+            <button
+              v-if="typeProblems?.length"
+              class="flex items-center gap-1 h-5 px-2 rounded text-xs text-muted hover:text-default hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary transition-colors"
+              :aria-expanded="typeProblemsOpen"
+              @click="typeProblemsOpen = !typeProblemsOpen"
+            >
+              <UIcon
+                name="i-lucide-circle-x"
+                class="size-3 text-error"
+              />
+              <span class="tabular-nums">{{ typeProblems.length }}</span>
+              {{ typeProblems.length === 1 ? 'problem' : 'problems' }}
+            </button>
+            <UTooltip
+              v-else-if="typeProblems"
+              text="Every component, prop, and slot matches its type"
+            >
+              <span class="flex items-center gap-1 px-2 text-xs text-muted">
+                <UIcon
+                  name="i-lucide-circle-check"
+                  class="size-3"
+                />
+                No type errors
+              </span>
+            </UTooltip>
           </div>
         </div>
       </Pane>

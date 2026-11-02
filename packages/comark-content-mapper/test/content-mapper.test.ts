@@ -24,6 +24,11 @@ it('reports props, slots, and frontmatter that do not match the registry, at the
       "test/fixture/invalid.md(8,27): error TS2322: Type 'number' is not assignable to type 'string'.",
       "test/fixture/invalid.md(9,2): error TS2345: Argument of type '"aside"' is not assignable to parameter of type '"default" | "footer"'.",
       "test/fixture/invalid.md(12,19): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "test/fixture/missed.md(6,5): error TS2339: Property 'quoted' does not exist on type 'ComarkComponents'.",
+      "test/fixture/missed.md(9,5): error TS2339: Property 'listed' does not exist on type 'ComarkComponents'.",
+      "test/fixture/missed.md(12,9): error TS2339: Property 'labelled' does not exist on type 'ComarkComponents'.",
+      "test/fixture/missed.md(15,9): error TS2322: Type 'string | number' is not assignable to type 'string'.",
+      "  Type 'number' is not assignable to type 'string'.",
       "test/fixture/untitled.md(1,1): error TS2741: Property 'title' is missing in type '{}' but required in type 'ComarkFrontmatter'.",
     ]
   `)

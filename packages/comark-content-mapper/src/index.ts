@@ -53,16 +53,21 @@ export function transform(source: string): Transformed {
   const mapped = (span: Span, code: string) =>
     map(code, span, source.slice(span[0], span[1]) === code ? VERBATIM : ATOM)
 
-  const writeProps = ({ span, props }: Props) => {
+  const writeProps = ({ span, props }: Props, frontmatter = false) => {
     // The braces map to the whole props block, so a missing required prop points at it.
     map('{', span)
     for (const prop of props) {
       mapped(prop.nameSpan, isIdentifier(prop.name) ? prop.name : JSON.stringify(prop.name))
       append(': ')
       const { value } = prop
-      if (value.kind === 'literal') mapped(prop.valueSpan, value.json)
-      else if (value.kind === 'frontmatter') mapped(value.span, source.slice(...value.span))
-      else append('undefined as any')
+      if (value.kind === 'literal') {
+        mapped(prop.valueSpan, value.json)
+        // Keeps `type: info` the literal "info", so a binding to it fits a prop typed `'info' | 'warning'`.
+        if (frontmatter && /^("|-?\d|true$|false$)/.test(value.json)) append(' as const')
+      } else if (value.kind === 'frontmatter') {
+        // `frontmatter.items.1` reads index 1, which TypeScript writes `frontmatter.items[1]`.
+        mapped(value.span, source.slice(...value.span).replace(/\.(\d+)/g, '[$1]'))
+      } else append('undefined as any')
       append(', ')
     }
     map('}', span)
@@ -70,7 +75,7 @@ export function transform(source: string): Transformed {
 
   append(PRELUDE)
   append('const frontmatter = ')
-  writeProps(frontmatter ?? { span: [0, 0], props: [] })
+  writeProps(frontmatter ?? { span: [0, 0], props: [] }, true)
   append(' ')
   // TypeScript reports a missing field on `satisfies`, so it maps to the opening `---`,
   // or to the start of a file with no frontmatter, where it keeps every feature.
@@ -119,6 +124,8 @@ export function toSource(mappings: Mapping[], start: number, end: number): Span 
   }
   const from = at(start, 'start')
   if (from === undefined) return undefined
+  // An empty range belongs to the mapping it starts in; its end could land in the one before.
+  if (end === start) return [from, from]
   return [from, Math.max(from, at(end, 'end') ?? from)]
 }
 

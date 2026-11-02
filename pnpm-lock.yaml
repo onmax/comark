@@ -1548,6 +1548,9 @@ importers:
       comark:
         specifier: workspace:*
         version: link:../comark
+      js-yaml:
+        specifier: 'catalog:'
+        version: 5.5.0
       ts-content-mapper:
         specifier: ^0.1.1
         version: 0.1.1

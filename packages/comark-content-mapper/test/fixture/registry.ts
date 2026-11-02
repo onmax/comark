@@ -11,5 +11,6 @@ declare module 'comark' {
   }
   interface ComarkFrontmatter {
     title: string
+    items?: (string | number)[]
   }
 }

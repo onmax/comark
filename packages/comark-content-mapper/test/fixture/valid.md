@@ -31,3 +31,34 @@ Body
 ::alert{type="info" .wide #intro}
 Classes and ids are not props.
 ::
+
+::card {title="Spaces before props"}
+::
+
+::card{title="Inline"}
+---
+tags: [a, b]
+---
+::
+
+::card
+
+```yaml [props]
+title: Props fence after a blank line
+```
+::
+
+::card{title="JSON without a colon" tags=["a", "b"] .bg-[url('x=1')]}
+#Footer
+::
+
+::card{title="first" title="Repeated, the last one wins"}
+#footer more words make this prose, not a slot
+::
+
+:UButton{label="Shorthand"}
+
+    :indented-code
+
+`a code span
+:over-lines`

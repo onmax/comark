@@ -58,13 +58,13 @@ tsc --noEmit --runExternalCode
 
 ## What it checks
 
-- **Components.** A `::name` or `:name` that isn't in `ComarkComponents` is an error. Block names are kebab-cased like Comark does, so `::UButton` is `u-button`.
-- **Props.** `key="value"` is a string, `:key="3"` is the JSON value, a bare `key` is `true`, and YAML props are their YAML values, the same values a renderer receives. Missing, unknown, and mistyped props are errors. `.class` and `#id` aren't checked.
-- **Bindings.** `:title="frontmatter.title"` is typed from the file's own frontmatter. Bindings to `data`, `meta`, or `props` come from the renderer, so they aren't checked.
-- **Slots.** `#name` inside a component must be one of its `ComarkComponentSlots`. A component missing there accepts any slot.
+- **Components.** A `::name` or `:name` that isn't in `ComarkComponents` is an error, including inside labels, blockquotes, and list items. Block names, and a `:name` alone on its line, are kebab-cased like Comark does, so `::UButton` is `u-button`.
+- **Props.** `key="value"` is a string, `:key="3"` is the JSON value, `key="[1, 2]"` and `key="{…}"` are JSON too, a bare `key` is `true`, and YAML props are their values under YAML's JSON schema, as Comark reads them. YAML props are added to the inline ones, and a repeated prop keeps its last value. Missing, unknown, and mistyped props are errors. `.class` and `#id` aren't checked.
+- **Bindings.** `:title="frontmatter.title"`, `frontmatter.items.0`, and `:title: frontmatter.title` in YAML props are typed from the file's own frontmatter, with its values kept as literals. Bindings to `data`, `meta`, or `props` come from the renderer, so they aren't checked.
+- **Slots.** `#name` inside a component must be one of its `ComarkComponentSlots`, kebab-cased like block names. A line like `#name more text` is prose, not a slot. A component missing there accepts any slot.
 - **Frontmatter.** The file's frontmatter must satisfy `ComarkFrontmatter`. Invalid YAML is reported by the mapper itself.
 
-Fenced code and inline code are skipped, and so is `:smile:`, which is an emoji.
+Fenced, indented, and inline code are skipped, including a code span over several lines, and so is `:smile:`, which is an emoji.
 
 ## Limits
 

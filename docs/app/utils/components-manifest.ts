@@ -55,6 +55,9 @@ const components: Record<string, () => Promise<unknown>> = {
   Ingredients: () => import('@/components/playground/Ingredients.vue'),
 }
 
+/** Names of the components the playground resolves, for its type checker. */
+export const componentNames = Object.keys(components)
+
 export default function resolveComponent(name: string) {
   if (name === 'span') {
     return null

@@ -553,6 +553,9 @@ importers:
       '@ai-sdk/vue':
         specifier: 'catalog:'
         version: 4.0.159(vue@3.5.44(typescript@6.0.3))(zod@4.6.7)
+      '@comark/content-mapper':
+        specifier: workspace:*
+        version: link:../packages/comark-content-mapper
       '@comark/nuxt':
         specifier: workspace:*
         version: link:../packages/comark-nuxt

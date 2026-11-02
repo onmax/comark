@@ -19,6 +19,8 @@ import { renderMarkdown } from 'comark/render'
 import { Splitpanes, Pane } from 'splitpanes'
 import { generationErrorMessage, playgroundExamples } from '~/constants'
 import resolveComponent from '~/utils/components-manifest'
+import { playgroundComponentTypes } from '~/utils/playground-types'
+import type { TypeProblem } from '~/utils/typecheck'
 import { decodeShareHash, encodeShareHash } from '~/utils/share'
 import PromptInput from '~/components/playground/PromptInput.vue'
 import GeneratingIndicator from '~/components/playground/GeneratingIndicator.vue'
@@ -367,7 +369,24 @@ const formattedOutputModel = computed({
 
 const isMatch = computed(() => !!formattedOutput.value && formattedOutput.value.trim() === markdown.value.trim())
 
-const markdownEditor = useTemplateRef<{ scrollToBottom: () => void }>('markdownEditor')
+const markdownEditor = useTemplateRef<{
+  scrollToBottom: () => void
+  reveal: (span: [number, number]) => void
+}>('markdownEditor')
+
+// `null` until the first check finishes, so the header doesn't flash "No type errors" while Monaco loads.
+const typeProblems = ref<(TypeProblem & { line: number })[] | null>(null)
+const typeProblemsOpen = ref(false)
+
+function revealTypeProblem(problem: TypeProblem) {
+  typeProblemsOpen.value = false
+  markdownEditor.value?.reveal(problem.span)
+}
+
+/** Splits a message at its backticks, so the list can set names and values in code. */
+function messageParts(message: string) {
+  return message.split('`').map((text, index) => ({ text, code: index % 2 === 1 }))
+}
 
 function scrollEditorToBottom() {
   nextTick(() => markdownEditor.value?.scrollToBottom())
@@ -456,6 +475,66 @@ async function handleGenerate(prompt: string) {
             </UTooltip>
 
             <div class="flex-1" />
+
+            <UTooltip
+              v-if="typeProblems && !typeProblems.length"
+              text="Every component, prop, and slot matches its type"
+            >
+              <span class="flex items-center gap-1.5 px-1.5 text-xs text-muted">
+                <UIcon
+                  name="i-lucide-circle-check"
+                  class="size-3.5"
+                />
+                No type errors
+              </span>
+            </UTooltip>
+            <UPopover
+              v-else-if="typeProblems"
+              v-model:open="typeProblemsOpen"
+              :content="{ align: 'end' }"
+              :ui="{ content: 'p-1 w-96 max-h-80 overflow-y-auto' }"
+            >
+              <UButton
+                size="xs"
+                color="error"
+                variant="soft"
+                icon="i-lucide-circle-x"
+                :label="`${typeProblems.length} ${typeProblems.length === 1 ? 'problem' : 'problems'}`"
+              />
+
+              <template #content>
+                <ul aria-label="Type problems">
+                  <li
+                    v-for="problem in typeProblems"
+                    :key="`${problem.span[0]}-${problem.code}`"
+                  >
+                    <button
+                      class="flex items-start gap-2.5 w-full px-2 py-1.5 rounded-md text-left text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary transition-colors"
+                      @click="revealTypeProblem(problem)"
+                    >
+                      <UIcon
+                        name="i-lucide-circle-x"
+                        class="size-4 mt-0.5 shrink-0 text-error"
+                      />
+                      <span class="flex-1 text-pretty">
+                        <template
+                          v-for="(part, index) in messageParts(problem.message)"
+                          :key="index"
+                        >
+                          <code
+                            v-if="part.code"
+                            class="font-mono text-[0.85em] px-1 py-px rounded bg-elevated"
+                            >{{ part.text }}</code
+                          >
+                          <template v-else>{{ part.text }}</template>
+                        </template>
+                      </span>
+                      <span class="shrink-0 mt-0.5 text-xs text-muted tabular-nums">Ln {{ problem.line }}</span>
+                    </button>
+                  </li>
+                </ul>
+              </template>
+            </UPopover>
 
             <UTooltip text="Copy a link to this Markdown">
               <UButton
@@ -556,6 +635,8 @@ async function handleGenerate(prompt: string) {
             <Editor
               ref="markdownEditor"
               v-model="markdown"
+              :components="playgroundComponentTypes"
+              @problems="typeProblems = $event"
             />
             <div
               v-if="isGenerating && !markdown"

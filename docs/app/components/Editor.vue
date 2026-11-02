@@ -1,10 +1,25 @@
 <script setup lang="ts">
 import loader from '@monaco-editor/loader'
 import { language as mdc } from '@nuxtlabs/monarch-mdc'
+import { transform } from '@comark/content-mapper'
+import type { Span } from '@comark/content-mapper'
+import { useDebounceFn } from '@vueuse/core'
+import { comarkRegistryDeclaration, describeTypeProblems } from '~/utils/typecheck'
+import type { ComponentTypes, TypeProblem } from '~/utils/typecheck'
 
-const { language = 'mdc', readOnly = false } = defineProps<{
+const {
+  language = 'mdc',
+  readOnly = false,
+  components,
+} = defineProps<{
   language?: string
   readOnly?: boolean
+  /** Type-checks the Markdown against these components and marks what doesn't match. */
+  components?: Record<string, ComponentTypes>
+}>()
+
+const emit = defineEmits<{
+  problems: [problems: (TypeProblem & { line: number })[]]
 }>()
 
 const model = defineModel<string>({
@@ -92,15 +107,87 @@ onMounted(async () => {
 
   editor.onDidChangeModelContent(() => {
     model.value = editor.getValue()
+    if (components) checkDebounced()
   })
 
   monaco.editor.setTheme(theme.value)
   loaded.value = true
+
+  if (components) startTypecheck(components)
 })
 
 onBeforeUnmount(() => {
   editor?.dispose()
+  typecheckDisposables.forEach((disposable) => disposable.dispose())
 })
+
+// The mapper turns the Markdown into TypeScript in a hidden model, Monaco's
+// TypeScript worker checks it, and the problems are mapped back as markers.
+const typecheckDisposables: { dispose: () => void }[] = []
+let virtualModel: any = null
+let checkVersion = 0
+
+function startTypecheck(types: Record<string, ComponentTypes>) {
+  const ts = monaco.typescript
+  ts.typescriptDefaults.setCompilerOptions({
+    strict: true,
+    noEmit: true,
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    lib: ['esnext'],
+  })
+  typecheckDisposables.push(
+    ts.typescriptDefaults.addExtraLib(comarkRegistryDeclaration(types), 'file:///comark-registry.d.ts')
+  )
+  virtualModel = monaco.editor.createModel('', 'typescript', monaco.Uri.parse('file:///comark-document.ts'))
+  typecheckDisposables.push(virtualModel)
+  check()
+}
+
+async function check() {
+  if (!editor || !virtualModel || !components) return
+  const version = ++checkVersion
+  const markdown = editor.getValue()
+  const mapped = transform(markdown)
+  virtualModel.setValue(mapped.text)
+
+  const worker = await (await monaco.typescript.getTypeScriptWorker())(virtualModel.uri)
+  const uri = virtualModel.uri.toString()
+  const diagnostics = [...(await worker.getSyntacticDiagnostics(uri)), ...(await worker.getSemanticDiagnostics(uri))]
+  if (version !== checkVersion) return
+
+  const markdownModel = editor.getModel()
+  const problems = describeTypeProblems(markdown, mapped, diagnostics, components)
+  monaco.editor.setModelMarkers(
+    markdownModel,
+    'comark',
+    problems.map((problem) => ({
+      ...toRange(problem.span),
+      severity: monaco.MarkerSeverity.Error,
+      // Markers are plain text, so the backticks that mark code in the list would show as-is.
+      message: problem.message.replace(/`/g, ''),
+      source: 'Comark',
+    }))
+  )
+  emit(
+    'problems',
+    problems.map((problem) => ({ ...problem, line: markdownModel.getPositionAt(problem.span[0]).lineNumber }))
+  )
+}
+
+const checkDebounced = useDebounceFn(check, 300)
+
+function toRange([start, end]: Span) {
+  const model = editor.getModel()
+  const from = model.getPositionAt(start)
+  const to = model.getPositionAt(end)
+  return {
+    startLineNumber: from.lineNumber,
+    startColumn: from.column,
+    endLineNumber: to.lineNumber,
+    endColumn: to.column,
+  }
+}
 
 watch(model, (newCode) => {
   if (editor && editor.getValue() !== newCode) {
@@ -127,6 +214,14 @@ watch(theme, (newTheme) => {
 })
 
 defineExpose({
+  /** Selects a span of the Markdown and scrolls it into view. */
+  reveal(span: Span) {
+    if (!editor) return
+    const range = toRange(span)
+    editor.setSelection(range)
+    editor.revealRangeInCenterIfOutsideViewport(range)
+    editor.focus()
+  },
   scrollToBottom() {
     if (!editor) return
     const lineCount = editor.getModel()?.getLineCount() ?? 1

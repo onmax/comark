@@ -435,6 +435,37 @@ Free for up to 5 services. No credit card. Deploys in under a minute.
 ::
 `
 
+export const typeCheckMarkdown = `---
+title: Beach house
+---
+
+# Beach house
+
+Five mistakes below. Hover a squiggle,
+or open the problem list above the editor.
+
+::RatingBar{rating="4.8"}
+#title
+Guest favourite
+::
+
+::HostInfo{name="Ana" badge="Superhost" duraton="3 years hosting"}
+::
+
+::Ingredients{title="Breakfast" servings="2"}
+::
+
+::Facility{icon="i-lucide-waves"}
+#title
+Beach access
+#subtitle
+Two minutes on foot.
+::
+
+::BookingCrad{title="Add dates for prices" cta="Check availability"}
+::
+`
+
 export type AiMode = 'showcase' | 'nuxt-ui'
 
 export type PlaygroundExample = {
@@ -473,6 +504,11 @@ export const playgroundExamples: PlaygroundExample[] = [
     content: nuxtUiMarkdown,
     mode: 'nuxt-ui',
     prompt: 'Landing page for a mountain bike rental in the Alps.',
+  },
+  {
+    label: 'Type check',
+    value: 'types',
+    content: typeCheckMarkdown,
   },
 ]
 

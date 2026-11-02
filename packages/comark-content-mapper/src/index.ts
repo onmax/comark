@@ -1,14 +1,28 @@
-import { MappedCodeBuilder } from 'ts-content-mapper'
-import type { PositionEncoding, TransformResult } from 'ts-content-mapper'
 import { scan } from './scan.ts'
-import type { Props, Span } from './scan.ts'
+import type { Problem, Props, Span } from './scan.ts'
 
 export { scan } from './scan.ts'
 export type { Component, Problem, Prop, PropValue, Props, Scan, Span } from './scan.ts'
 
+/** `[virtualStart, virtualLength, originalStart, originalLength, kind, features?]`, in UTF-16 code units, as TypeScript's content mapper protocol sends it. */
+export type Mapping = [number, number, number, number, 0 | 1 | 2, number?]
+
+export interface Transformed {
+  /** TypeScript that type-checks the document. */
+  text: string
+  mappings: Mapping[]
+  /** Syntax problems found before type checking, such as invalid YAML. */
+  problems: Problem[]
+}
+
+const VERBATIM = 0 as const
+const ATOM = 1 as const
+// Definition and references only: TypeScript's default for a zero-length anchor.
+const ANCHOR_FEATURES = 8 | 64
+
 const PRELUDE = `import type { ComarkComponents as Components, ComarkComponentSlots as Slots, ComarkFrontmatter as Frontmatter } from 'comark'
 declare const components: Components
-declare function component<Props>(type: Props, props: NoInfer<Props>): void
+declare function component<Props>(type: Props): (props: Props) => void
 declare function slot<Name extends string>(component: Name, slot: Name extends keyof Slots ? Slots[Name] : string): void
 export {}
 `
@@ -17,73 +31,89 @@ export {}
  * Turns a Comark document into TypeScript that checks its frontmatter against
  * `ComarkFrontmatter`, each component's props against `ComarkComponents`, and
  * each slot against `ComarkComponentSlots`, with every check mapped back to
- * the Markdown it came from.
+ * the Markdown it came from. It has no Node.js dependencies, so it also runs in
+ * a browser next to an in-page TypeScript checker.
  */
-export function transform(source: string, positionEncoding: PositionEncoding = 'utf-16'): TransformResult {
+export function transform(source: string): Transformed {
   const { frontmatter, components, problems } = scan(source)
-  const code = new MappedCodeBuilder(source, { positionEncoding })
+  let text = ''
+  const mappings: Mapping[] = []
+
+  const append = (code: string) => (text += code)
+  const map = (code: string, span: Span, kind: 0 | 1 = ATOM) => {
+    mappings.push(
+      span[0] === span[1]
+        ? [text.length, code.length, span[0], 0, ATOM, ANCHOR_FEATURES]
+        : [text.length, code.length, span[0], span[1] - span[0], kind]
+    )
+    text += code
+  }
   // Text that reads the same in Markdown and TypeScript maps verbatim, so the
   // editor can complete and rename inside it.
-  const mapped = (span: Span) => (text: string) =>
-    source.slice(span[0], span[1]) === text
-      ? code.appendVerbatim(span[0], span[1])
-      : code.appendAtom(text, span[0], span[1])
+  const mapped = (span: Span, code: string) =>
+    map(code, span, source.slice(span[0], span[1]) === code ? VERBATIM : ATOM)
 
-  code.append(PRELUDE)
-  code.append('const frontmatter = ')
-  writeProps(code, frontmatter ?? { span: [0, 0], props: [] }, mapped)
-  code.append(' satisfies Frontmatter\n')
+  const writeProps = ({ span, props }: Props) => {
+    // The braces map to the whole props block, so a missing required prop points at it.
+    map('{', span)
+    for (const prop of props) {
+      mapped(prop.nameSpan, isIdentifier(prop.name) ? prop.name : JSON.stringify(prop.name))
+      append(': ')
+      const { value } = prop
+      if (value.kind === 'literal') mapped(prop.valueSpan, value.json)
+      else if (value.kind === 'frontmatter') mapped(value.span, source.slice(...value.span))
+      else append('undefined as any')
+      append(', ')
+    }
+    map('}', span)
+  }
+
+  append(PRELUDE)
+  append('const frontmatter = ')
+  writeProps(frontmatter ?? { span: [0, 0], props: [] })
+  append(' satisfies Frontmatter\n')
 
   for (const component of components) {
-    code.append('component(components')
-    if (isIdentifier(component.name)) code.append('.')
-    mapped(component.nameSpan)(isIdentifier(component.name) ? component.name : `[${JSON.stringify(component.name)}]`)
-    code.append(', ')
-    writeProps(code, component.props, mapped)
-    code.append(')\n')
+    append('component(components')
+    if (isIdentifier(component.name)) {
+      append('.')
+      mapped(component.nameSpan, component.name)
+    } else {
+      map(`[${JSON.stringify(component.name)}]`, component.nameSpan)
+    }
+    append(')(')
+    writeProps(component.props)
+    append(')\n')
     for (const slot of component.slots) {
-      code.append(`slot(${JSON.stringify(component.name)}, `)
-      mapped(slot.span)(JSON.stringify(slot.name))
-      code.append(')\n')
+      append(`slot(${JSON.stringify(component.name)}, `)
+      map(JSON.stringify(slot.name), slot.span)
+      append(')\n')
     }
   }
 
-  return {
-    ...code.build('.ts'),
-    diagnostics: problems.map(({ message, span, code: number }) => ({
-      messageText: message,
-      start: offset(source, span[0], positionEncoding),
-      length: offset(source, span[1], positionEncoding) - offset(source, span[0], positionEncoding),
-      code: number,
-    })),
-  }
+  return { text, mappings, problems }
 }
 
-function writeProps(
-  code: MappedCodeBuilder,
-  { span, props }: Props,
-  mapped: (span: Span) => (text: string) => unknown
-) {
-  // The braces map to the whole props block, so a missing required prop points at it.
-  const brace = (text: string) =>
-    span[0] === span[1] ? code.appendAnchored(text, span[0]) : code.appendAtom(text, span[0], span[1])
-  brace('{')
-  for (const prop of props) {
-    mapped(prop.nameSpan)(isIdentifier(prop.name) ? prop.name : JSON.stringify(prop.name))
-    code.append(': ')
-    const { value } = prop
-    if (value.kind === 'literal') mapped(prop.valueSpan)(value.json)
-    else if (value.kind === 'frontmatter') code.appendVerbatim(value.span[0], value.span[1])
-    else code.append('undefined as any')
-    code.append(', ')
+/**
+ * Maps a range of the TypeScript from {@link transform} back to the Markdown.
+ * Returns `undefined` for code the mapper wrote with no source, like the prelude.
+ */
+export function toSource(mappings: Mapping[], start: number, end: number): Span | undefined {
+  const at = (offset: number, edge: 'start' | 'end') => {
+    for (const [virtualStart, virtualLength, originalStart, originalLength, kind] of mappings) {
+      const inside =
+        offset >= virtualStart &&
+        (edge === 'start' ? offset < virtualStart + virtualLength : offset <= virtualStart + virtualLength)
+      if (!inside) continue
+      if (kind === VERBATIM) return originalStart + offset - virtualStart
+      return edge === 'start' ? originalStart : originalStart + originalLength
+    }
   }
-  brace('}')
+  const from = at(start, 'start')
+  if (from === undefined) return undefined
+  return [from, Math.max(from, at(end, 'end') ?? from)]
 }
 
 function isIdentifier(name: string) {
   return /^[a-z_$][\w$]*$/i.test(name)
-}
-
-function offset(source: string, index: number, encoding: PositionEncoding) {
-  return encoding === 'utf-8' ? Buffer.byteLength(source.slice(0, index)) : index
 }

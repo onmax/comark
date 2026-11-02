@@ -25,7 +25,7 @@ import { transform } from '@comark/content-mapper'
 import type { Span } from '@comark/content-mapper'
 import { useDebounceFn } from '@vueuse/core'
 import { comarkRegistryDeclaration, describeTypeProblems, typeProblemMarkdown } from '~/utils/typecheck'
-import type { ComponentTypes, TypeProblem } from '~/utils/typecheck'
+import type { ComponentTypes, TypeFix, TypeProblem } from '~/utils/typecheck'
 
 const {
   language = 'mdc',
@@ -156,6 +156,10 @@ let virtualModel: any = null
 let problemDecorations: any = null
 let highlightDecorations: any = null
 let checkVersion = 0
+// The problems on screen and the model version their spans belong to; a fix applies only to that text.
+let shownProblems: TypeProblem[] = []
+let shownVersionId = 0
+let fixCommand = ''
 
 function startTypecheck(types: Record<string, ComponentTypes>) {
   const ts = monaco.typescript
@@ -176,6 +180,39 @@ function startTypecheck(types: Record<string, ComponentTypes>) {
   typecheckDisposables.push(virtualModel)
   problemDecorations = editor.createDecorationsCollection()
   highlightDecorations = editor.createDecorationsCollection()
+  fixCommand = `comark.fix-${documentCount}`
+  typecheckDisposables.push(
+    monaco.editor.registerCommand(fixCommand, (_: unknown, problem: number, fix: number) =>
+      applyFix(shownProblems[problem]?.fixes?.[fix])
+    ),
+    // Ctrl+. and the light bulb, for the problems under the cursor or selection.
+    monaco.languages.registerCodeActionProvider(language, {
+      provideCodeActions(model: any, range: any) {
+        const fixable = model === editor?.getModel() && model.getVersionId() === shownVersionId
+        const actions = fixable
+          ? shownProblems.flatMap((problem) =>
+              monaco.Range.areIntersectingOrTouching(squiggleRange(problem.span), range)
+                ? (problem.fixes ?? []).map((fix, index) => ({
+                    title: fix.title.replace(/`/g, ''),
+                    kind: 'quickfix',
+                    isPreferred: index === 0,
+                    edit: {
+                      edits: [
+                        {
+                          resource: model.uri,
+                          versionId: shownVersionId,
+                          textEdit: { range: toRange(fix.span), text: fix.text },
+                        },
+                      ],
+                    },
+                  }))
+                : []
+            )
+          : []
+        return { actions, dispose() {} }
+      },
+    })
+  )
   check()
 }
 
@@ -197,14 +234,16 @@ async function check() {
 
   const markdownModel = editor.getModel()
   const problems = describeTypeProblems(markdown, mapped, diagnostics, components)
+  shownProblems = problems
+  shownVersionId = markdownModel.getVersionId()
   // Decorations rather than markers: a marker's hover is plain text, and a decoration's
   // is Markdown, so the names and values in each message show as code.
   problemDecorations.set(
-    problems.map((problem) => ({
+    problems.map((problem, index) => ({
       range: squiggleRange(problem.span),
       options: {
         className: 'squiggly-error',
-        hoverMessage: { value: typeProblemMarkdown(problem.message) },
+        hoverMessage: { value: hoverMarkdown(problem, index), isTrusted: { enabledCommands: [fixCommand] } },
         overviewRuler: {
           color: { id: 'editorOverviewRuler.errorForeground' },
           position: monaco.editor.OverviewRulerLane.Right,
@@ -221,6 +260,23 @@ async function check() {
 }
 
 const checkDebounced = useDebounceFn(check, 300)
+
+function hoverMarkdown(problem: TypeProblem, index: number) {
+  const links = (problem.fixes ?? []).map(
+    (fix, f) =>
+      `[${typeProblemMarkdown(fix.title)}](command:${fixCommand}?${encodeURIComponent(JSON.stringify([index, f]))})`
+  )
+  return [typeProblemMarkdown(problem.message), ...(links.length ? [links.join(' · ')] : [])].join('\n\n')
+}
+
+function applyFix(fix?: TypeFix) {
+  if (!fix || !editor || editor.getModel().getVersionId() !== shownVersionId) return
+  const range = toRange(fix.span)
+  editor.pushUndoStop()
+  editor.executeEdits('comark-fix', [{ range, text: fix.text }])
+  editor.pushUndoStop()
+  editor.focus()
+}
 
 function toRange([start, end]: Span) {
   const model = editor.getModel()
@@ -279,6 +335,8 @@ defineExpose({
     editor.revealRangeInCenterIfOutsideViewport(range)
     editor.focus()
   },
+  /** Applies one of a problem's fixes, if the Markdown hasn't changed since it was checked. */
+  fix: applyFix,
   /** Highlights a span of the Markdown, or clears the highlight. */
   highlight(span?: Span) {
     highlightDecorations?.set(

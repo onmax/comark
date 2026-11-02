@@ -21,7 +21,7 @@ import { generationErrorMessage, playgroundExamples } from '~/constants'
 import resolveComponent from '~/utils/components-manifest'
 import { playgroundComponentTypes } from '~/utils/playground-types'
 import { typeProblemParts } from '~/utils/typecheck'
-import type { TypeProblem } from '~/utils/typecheck'
+import type { TypeFix, TypeProblem } from '~/utils/typecheck'
 import { decodeShareHash, encodeShareHash } from '~/utils/share'
 import PromptInput from '~/components/playground/PromptInput.vue'
 import GeneratingIndicator from '~/components/playground/GeneratingIndicator.vue'
@@ -374,6 +374,7 @@ const markdownEditor = useTemplateRef<{
   scrollToBottom: () => void
   reveal: (span: [number, number]) => void
   highlight: (span?: [number, number]) => void
+  fix: (fix: TypeFix) => void
 }>('markdownEditor')
 
 // `null` until the first check finishes, so the header doesn't flash "No type errors" while Monaco loads.
@@ -639,13 +640,14 @@ async function handleGenerate(prompt: string) {
               <li
                 v-for="problem in typeProblems"
                 :key="`${problem.span[0]}-${problem.code}`"
+                class="flex items-start hover:bg-elevated transition-colors"
+                @mouseenter="markdownEditor?.highlight(problem.span)"
+                @mouseleave="markdownEditor?.highlight()"
               >
                 <button
-                  class="flex items-start gap-2 w-full px-3 py-1 text-left text-sm hover:bg-elevated active:bg-accented focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary transition-colors"
+                  class="flex flex-1 min-w-0 items-start gap-2 px-3 py-1 text-left text-sm active:bg-accented focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary transition-colors"
                   @click="revealTypeProblem(problem)"
-                  @mouseenter="markdownEditor?.highlight(problem.span)"
                   @focus="markdownEditor?.highlight(problem.span)"
-                  @mouseleave="markdownEditor?.highlight()"
                   @blur="markdownEditor?.highlight()"
                 >
                   <UIcon
@@ -667,6 +669,32 @@ async function handleGenerate(prompt: string) {
                   </span>
                   <span class="shrink-0 mt-0.5 text-xs text-muted tabular-nums">Ln {{ problem.line }}</span>
                 </button>
+                <div
+                  v-if="problem.fixes"
+                  class="shrink-0 flex gap-1 py-0.5 pr-2"
+                >
+                  <UButton
+                    v-for="(fix, index) in problem.fixes"
+                    :key="index"
+                    size="xs"
+                    color="neutral"
+                    variant="soft"
+                    icon="i-lucide-wand-sparkles"
+                    @click="markdownEditor?.fix(fix)"
+                  >
+                    <template
+                      v-for="(part, p) in typeProblemParts(fix.title)"
+                      :key="p"
+                    >
+                      <code
+                        v-if="part.code"
+                        class="font-mono"
+                        >{{ part.text }}</code
+                      >
+                      <template v-else>{{ part.text }}</template>
+                    </template>
+                  </UButton>
+                </div>
               </li>
             </ul>
           </section>

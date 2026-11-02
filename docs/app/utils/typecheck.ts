@@ -14,6 +14,16 @@ export interface TypeProblem {
   message: string
   span: Span
   code: number
+  /** Edits to the Markdown that fix it, when the fix is certain enough to apply in one click. */
+  fixes?: TypeFix[]
+}
+
+export interface TypeFix {
+  /** What it does, with code in backticks like a problem's message. */
+  title: string
+  /** The Markdown it replaces; an empty span inserts. */
+  span: Span
+  text: string
 }
 
 export interface MessageChain {
@@ -124,11 +134,15 @@ export function describeTypeProblems(
       raw.match(/missing the following properties from type '.+': (.+)$/m)?.[1]?.split(', ')
 
     let message = raw.replace(/`/g, TICK)
+    let fixes: TypeFix[] | undefined
+    const replace = (span: Span, text: string): TypeFix => ({ title: `Change to ${code(text)}`, span, text })
     if (slot) {
-      const slots = (type ?? 'never') === 'never' ? [] : type!.split(' | ').map((s) => code(`#${s.replace(/"/g, '')}`))
+      const names = (type ?? 'never') === 'never' ? [] : type!.split(' | ').map((s) => s.replace(/"/g, ''))
+      const slots = names.map((name) => code(`#${name}`))
       message = slots.length
         ? `${owner} has no ${code(`#${slot.name}`)} slot. Use ${list(slots)}.`
         : `${owner} has no named slots, so ${code(`#${slot.name}`)} goes nowhere.`
+      fixes = names.map((name) => ({ title: `Change to ${code(`#${name}`)}`, span: slot.span, text: name }))
     } else if (nested) {
       const where = component ? code(prop.name) : `${code(prop.name)} in the frontmatter`
       const detail = raw.split('\n').at(-1)!.trim().replace(/`/g, TICK)
@@ -139,6 +153,35 @@ export function describeTypeProblems(
         'and'
       )
       message = `${owner} needs ${missing.length === 1 ? `a ${wanted} prop` : `${wanted} props`}.`
+      // Only inline props get one: where a prop goes in YAML props is the author's call.
+      const props = component?.props
+      const known = Object.keys(components).find((name) => kebabCase(name) === component?.name)
+      const added = missing.map((p) => placeholder(p, known ? components[known]!.props : undefined)).join(' ')
+      if (props && component && props.span[0] === component.nameSpan[0])
+        fixes = [
+          {
+            title: `Add ${list(
+              missing.map((p) => code(p)),
+              'and'
+            )}`,
+            span: [props.span[1], props.span[1]],
+            text: `{${added}}`,
+          },
+        ]
+      else if (props && markdown[props.span[1] - 1] === '}') {
+        const at = props.span[1] - 1
+        const text = props.props.length ? ` ${added}` : added
+        fixes = [
+          {
+            title: `Add ${list(
+              missing.map((p) => code(p)),
+              'and'
+            )}`,
+            span: [at, at],
+            text,
+          },
+        ]
+      }
     } else if (
       (diagnostic.code === 2339 || diagnostic.code === 2551) &&
       component &&
@@ -146,6 +189,7 @@ export function describeTypeProblems(
     ) {
       const guess = raw.match(/Did you mean '(.+)'\?/)?.[1] ?? closest(component.name, names)
       message = `No component is named ${code(written)}.${guess ? ` Did you mean ${code(asWritten(guess))}?` : ''}`
+      if (guess) fixes = [replace(component.nameSpan, asWritten(guess))]
     } else if (diagnostic.code === 2339 || diagnostic.code === 2551) {
       message = `The frontmatter has no ${code(text.split('.').pop()!)}, so this binding is ${code('undefined')}.`
     } else if ((diagnostic.code === 2353 || diagnostic.code === 2561) && prop) {
@@ -158,6 +202,7 @@ export function describeTypeProblems(
           ? ` Its props are ${list(props.map((p) => code(p)))}.`
           : ''
       message = `${owner} has no ${code(prop.name)} prop.${hint}`
+      if (guess) fixes = [replace(prop.nameSpan, guess)]
     } else if (diagnostic.code === 2322 && prop && type) {
       const where = component ? code(prop.name) : `${code(prop.name)} in the frontmatter`
       const bound = markdown[prop.nameSpan[0] - 1] === ':'
@@ -170,8 +215,12 @@ export function describeTypeProblems(
         component && !bound && fits
           ? `${where} takes ${article(type)}. Write ${code(`:${prop.name}=${value}`)} to pass one.`
           : `${where} takes ${article(type)}, not ${value === undefined ? 'this value' : code(value)}.`
+      if (component && !bound && fits)
+        fixes = [
+          { title: `Write ${code(`:${prop.name}=${value}`)}`, span: [prop.nameSpan[0], prop.nameSpan[0]], text: ':' },
+        ]
     }
-    problems.push({ message, span, code: diagnostic.code })
+    problems.push({ message, span, code: diagnostic.code, ...(fixes?.length ? { fixes } : {}) })
   }
 
   return problems.sort((a, b) => a.span[0] - b.span[0])
@@ -212,6 +261,14 @@ function flatten(message: string | MessageChain): string {
 /** `number` reads better as "a number"; unions, literals, and objects stay as TypeScript writes them, as code. */
 function article(type: string) {
   return /^(number|boolean|string)$/.test(type) ? `a ${type}` : code(type)
+}
+
+/** A prop written so that it at least has its declared type: `:count="0"` for a number, `open` for a boolean. */
+function placeholder(name: string, props?: string) {
+  const type = props?.match(new RegExp(`^\\s*${name.replace(/[$]/g, '\\$&')}\\??:\\s*([^;,\\n]+)`, 'm'))?.[1]?.trim()
+  if (type === 'number') return `:${name}="0"`
+  if (type === 'boolean') return name
+  return `${name}=""`
 }
 
 function propNames(props?: string) {

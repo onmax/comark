@@ -428,6 +428,33 @@ export type ResolvedFrontmatter<T> = [keyof T] extends [never] ? Record<string, 
 
 // #endregion
 
+/**
+ * Props of each component a document may use, keyed by the name written after
+ * `::` or `:`. Empty here; augment it to have `@comark/content-mapper` check
+ * Markdown files against it:
+ *
+ * ```ts
+ * declare module 'comark' {
+ *   interface ComarkComponents {
+ *     alert: { type: 'info' | 'warning' }
+ *   }
+ * }
+ * ```
+ */
+export interface ComarkComponents {}
+
+/**
+ * Slot names each component accepts, as a union, keyed like
+ * {@link ComarkComponents}. A component missing here accepts any slot.
+ */
+export interface ComarkComponentSlots {}
+
+/**
+ * Frontmatter every Markdown file must satisfy. Empty here, which accepts any
+ * frontmatter; augment it like {@link ComarkComponents}.
+ */
+export interface ComarkFrontmatter {}
+
 export type ComponentManifest = (name: string) => unknown | Promise<unknown> | undefined | null
 export interface ComarkContextProvider {
   components: Record<string, any>

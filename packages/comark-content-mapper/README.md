@@ -12,10 +12,10 @@ It is a [content mapper](https://devblogs.microsoft.com/typescript/announcing-ty
 
 ## Setup
 
-Install TypeScript 7.1 and the mapper:
+Install TypeScript 7.1, the mapper, and `comark`, whose types you augment below:
 
 ```sh
-pnpm add -D typescript@7.1.0-beta @comark/content-mapper
+pnpm add -D typescript@7.1.0-beta @comark/content-mapper comark
 ```
 
 Register it for `.md` files in `tsconfig.json`:
@@ -69,5 +69,5 @@ Fenced code and inline code are skipped, and so is `:smile:`, which is an emoji.
 ## Limits
 
 - Completion inside a prop value doesn't work yet. Hover and go to definition do, on component names and props.
-- When the mapper reports invalid YAML, TypeScript skips type checking until it is fixed, as it does for a syntax error.
+- When the mapper reports invalid YAML, `tsc` skips type checking until it is fixed, as it does for a syntax error. The editor still shows type errors next to it.
 - Props are checked as written. A renderer that renames them, like Vue turning `icon-name` into `iconName`, needs the written name in the registry.

@@ -71,7 +71,15 @@ export function transform(source: string): Transformed {
   append(PRELUDE)
   append('const frontmatter = ')
   writeProps(frontmatter ?? { span: [0, 0], props: [] })
-  append(' satisfies Frontmatter\n')
+  append(' ')
+  // TypeScript reports a missing field on `satisfies`, so it maps to the opening `---`,
+  // or to the start of a file with no frontmatter, where it keeps every feature.
+  if (frontmatter) map('satisfies', [frontmatter.span[0], frontmatter.span[0] + 3])
+  else {
+    mappings.push([text.length, 'satisfies'.length, 0, 0, ATOM])
+    append('satisfies')
+  }
+  append(' Frontmatter\n')
 
   for (const component of components) {
     append('component(components')

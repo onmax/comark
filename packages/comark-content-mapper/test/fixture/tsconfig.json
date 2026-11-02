@@ -8,5 +8,5 @@
     "skipLibCheck": true
   },
   "contentMappers": [{ "package": "../..", "extensions": [".md"] }],
-  "include": ["registry.ts", "valid.md", "invalid.md"]
+  "include": ["registry.ts", "valid.md", "invalid.md", "untitled.md"]
 }

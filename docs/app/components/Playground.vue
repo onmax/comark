@@ -19,6 +19,9 @@ import { renderMarkdown } from 'comark/render'
 import { Splitpanes, Pane } from 'splitpanes'
 import { generationErrorMessage, playgroundExamples } from '~/constants'
 import resolveComponent from '~/utils/components-manifest'
+import { playgroundComponentTypes } from '~/utils/playground-types'
+import { typeProblemParts } from '~/utils/typecheck'
+import type { TypeFix, TypeProblem } from '~/utils/typecheck'
 import { decodeShareHash, encodeShareHash } from '~/utils/share'
 import PromptInput from '~/components/playground/PromptInput.vue'
 import GeneratingIndicator from '~/components/playground/GeneratingIndicator.vue'
@@ -367,7 +370,21 @@ const formattedOutputModel = computed({
 
 const isMatch = computed(() => !!formattedOutput.value && formattedOutput.value.trim() === markdown.value.trim())
 
-const markdownEditor = useTemplateRef<{ scrollToBottom: () => void }>('markdownEditor')
+const markdownEditor = useTemplateRef<{
+  scrollToBottom: () => void
+  reveal: (span: [number, number]) => void
+  highlight: (span?: [number, number]) => void
+  fix: (fix: TypeFix) => void
+}>('markdownEditor')
+
+// `null` until the first check finishes, so the header doesn't flash "No type errors" while Monaco loads.
+const typeProblems = ref<(TypeProblem & { line: number })[] | null>(null)
+// Open by default, so a document with mistakes shows them without a click, like an editor's Problems panel.
+const typeProblemsOpen = ref(true)
+
+function revealTypeProblem(problem: TypeProblem) {
+  markdownEditor.value?.reveal(problem.span)
+}
 
 function scrollEditorToBottom() {
   nextTick(() => markdownEditor.value?.scrollToBottom())
@@ -556,6 +573,8 @@ async function handleGenerate(prompt: string) {
             <Editor
               ref="markdownEditor"
               v-model="markdown"
+              :components="playgroundComponentTypes"
+              @problems="typeProblems = $event"
             />
             <div
               v-if="isGenerating && !markdown"
@@ -589,6 +608,124 @@ async function handleGenerate(prompt: string) {
               floating
               @submit="handleGenerate"
             />
+          </div>
+
+          <section
+            v-if="typeProblemsOpen && typeProblems?.length"
+            aria-label="Problems"
+            class="shrink-0 flex flex-col h-44 border-t border-default bg-default"
+          >
+            <div class="shrink-0 flex items-center gap-2 pl-3 pr-1.5 h-8">
+              <span class="text-xs font-medium uppercase tracking-wider text-toned">Problems</span>
+              <UBadge
+                size="sm"
+                color="neutral"
+                variant="subtle"
+                class="tabular-nums"
+                :label="typeProblems.length"
+              />
+              <div class="flex-1" />
+              <UTooltip text="Close">
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-x"
+                  aria-label="Close problems"
+                  @click="typeProblemsOpen = false"
+                />
+              </UTooltip>
+            </div>
+            <ul class="flex-1 min-h-0 overflow-y-auto pb-1">
+              <li
+                v-for="problem in typeProblems"
+                :key="`${problem.span[0]}-${problem.code}`"
+                class="flex items-start hover:bg-elevated transition-colors"
+                @mouseenter="markdownEditor?.highlight(problem.span)"
+                @mouseleave="markdownEditor?.highlight()"
+              >
+                <button
+                  class="flex flex-1 min-w-0 items-start gap-2 px-3 py-1 text-left text-sm active:bg-accented focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary transition-colors"
+                  @click="revealTypeProblem(problem)"
+                  @focus="markdownEditor?.highlight(problem.span)"
+                  @blur="markdownEditor?.highlight()"
+                >
+                  <UIcon
+                    name="i-lucide-circle-x"
+                    class="size-4 mt-0.5 shrink-0 text-error"
+                  />
+                  <span class="flex-1 text-pretty">
+                    <template
+                      v-for="(part, index) in typeProblemParts(problem.message)"
+                      :key="index"
+                    >
+                      <code
+                        v-if="part.code"
+                        class="font-mono text-[0.85em] px-1 py-px rounded bg-inverted/10"
+                        >{{ part.text }}</code
+                      >
+                      <template v-else>{{ part.text }}</template>
+                    </template>
+                  </span>
+                  <span class="shrink-0 mt-0.5 text-xs text-muted tabular-nums">Ln {{ problem.line }}</span>
+                </button>
+                <div
+                  v-if="problem.fixes"
+                  class="shrink-0 flex gap-1 py-0.5 pr-2"
+                >
+                  <UButton
+                    v-for="(fix, index) in problem.fixes"
+                    :key="index"
+                    size="xs"
+                    color="neutral"
+                    variant="soft"
+                    icon="i-lucide-wand-sparkles"
+                    @click="markdownEditor?.fix(fix)"
+                  >
+                    <template
+                      v-for="(part, p) in typeProblemParts(fix.title)"
+                      :key="p"
+                    >
+                      <code
+                        v-if="part.code"
+                        class="font-mono"
+                        >{{ part.text }}</code
+                      >
+                      <template v-else>{{ part.text }}</template>
+                    </template>
+                  </UButton>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <!-- Status bar -->
+          <div class="shrink-0 flex items-center gap-4 px-2 h-7 border-t border-default bg-default">
+            <button
+              v-if="typeProblems?.length"
+              class="flex items-center gap-1 h-5 px-2 rounded text-xs text-muted hover:text-default hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary transition-colors"
+              :aria-expanded="typeProblemsOpen"
+              @click="typeProblemsOpen = !typeProblemsOpen"
+            >
+              <UIcon
+                name="i-lucide-circle-x"
+                class="size-3 text-error"
+              />
+              <span class="tabular-nums">{{ typeProblems.length }}</span>
+              {{ typeProblems.length === 1 ? 'problem' : 'problems' }}
+            </button>
+            <UTooltip
+              v-else-if="typeProblems"
+              text="Every component, prop, and slot matches its type"
+            >
+              <span class="flex items-center gap-1 px-2 text-xs text-muted">
+                <UIcon
+                  name="i-lucide-circle-check"
+                  class="size-3"
+                />
+                No type errors
+              </span>
+            </UTooltip>
           </div>
         </div>
       </Pane>

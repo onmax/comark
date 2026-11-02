@@ -20,6 +20,7 @@ import { Splitpanes, Pane } from 'splitpanes'
 import { generationErrorMessage, playgroundExamples } from '~/constants'
 import resolveComponent from '~/utils/components-manifest'
 import { playgroundComponentTypes } from '~/utils/playground-types'
+import { typeProblemParts } from '~/utils/typecheck'
 import type { TypeProblem } from '~/utils/typecheck'
 import { decodeShareHash, encodeShareHash } from '~/utils/share'
 import PromptInput from '~/components/playground/PromptInput.vue'
@@ -384,11 +385,6 @@ function revealTypeProblem(problem: TypeProblem) {
   markdownEditor.value?.reveal(problem.span)
 }
 
-/** Splits a message at its backticks, so the list can set names and values in code. */
-function messageParts(message: string) {
-  return message.split('`').map((text, index) => ({ text, code: index % 2 === 1 }))
-}
-
 function scrollEditorToBottom() {
   nextTick(() => markdownEditor.value?.scrollToBottom())
 }
@@ -658,7 +654,7 @@ async function handleGenerate(prompt: string) {
                   />
                   <span class="flex-1 text-pretty">
                     <template
-                      v-for="(part, index) in messageParts(problem.message)"
+                      v-for="(part, index) in typeProblemParts(problem.message)"
                       :key="index"
                     >
                       <code

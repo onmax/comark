@@ -1,10 +1,30 @@
+<script lang="ts">
+// Monaco's TypeScript defaults are global, so every checked editor on the page shares one
+// registry declaration, kept until the last of them unmounts.
+let registry: { lib: { dispose: () => void }; users: number } | null = null
+let documentCount = 0
+
+function useRegistry(ts: any, declaration: string) {
+  registry ??= { lib: ts.typescriptDefaults.addExtraLib(declaration, 'file:///comark-registry.d.ts'), users: 0 }
+  registry.users++
+  return {
+    dispose() {
+      if (registry && --registry.users === 0) {
+        registry.lib.dispose()
+        registry = null
+      }
+    },
+  }
+}
+</script>
+
 <script setup lang="ts">
 import loader from '@monaco-editor/loader'
 import { language as mdc } from '@nuxtlabs/monarch-mdc'
 import { transform } from '@comark/content-mapper'
 import type { Span } from '@comark/content-mapper'
 import { useDebounceFn } from '@vueuse/core'
-import { comarkRegistryDeclaration, describeTypeProblems } from '~/utils/typecheck'
+import { comarkRegistryDeclaration, describeTypeProblems, typeProblemMarkdown } from '~/utils/typecheck'
 import type { ComponentTypes, TypeProblem } from '~/utils/typecheck'
 
 const {
@@ -110,6 +130,8 @@ onMounted(async () => {
 
   editor.onDidChangeModelContent(() => {
     model.value = editor.getValue()
+    // A check still waiting on the worker is for the old text now.
+    checkVersion++
     if (components) checkDebounced()
   })
 
@@ -120,12 +142,15 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  editor?.dispose()
+  checkVersion++
   typecheckDisposables.forEach((disposable) => disposable.dispose())
+  virtualModel = null
+  editor?.dispose()
+  editor = null
 })
 
 // The mapper turns the Markdown into TypeScript in a hidden model, Monaco's
-// TypeScript worker checks it, and the problems are mapped back as markers.
+// TypeScript worker checks it, and the problems are mapped back as decorations.
 const typecheckDisposables: { dispose: () => void }[] = []
 let virtualModel: any = null
 let problemDecorations: any = null
@@ -139,12 +164,15 @@ function startTypecheck(types: Record<string, ComponentTypes>) {
     noEmit: true,
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
-    lib: ['esnext'],
+    // The worker looks libraries up by file name; `esnext` alone finds none, and arrays go unchecked.
+    lib: ['lib.esnext.d.ts'],
   })
-  typecheckDisposables.push(
-    ts.typescriptDefaults.addExtraLib(comarkRegistryDeclaration(types), 'file:///comark-registry.d.ts')
+  typecheckDisposables.push(useRegistry(ts, comarkRegistryDeclaration(types)))
+  virtualModel = monaco.editor.createModel(
+    '',
+    'typescript',
+    monaco.Uri.parse(`file:///comark-document-${++documentCount}.ts`)
   )
-  virtualModel = monaco.editor.createModel('', 'typescript', monaco.Uri.parse('file:///comark-document.ts'))
   typecheckDisposables.push(virtualModel)
   problemDecorations = editor.createDecorationsCollection()
   highlightDecorations = editor.createDecorationsCollection()
@@ -158,10 +186,14 @@ async function check() {
   const mapped = transform(markdown)
   virtualModel.setValue(mapped.text)
 
-  const worker = await (await monaco.typescript.getTypeScriptWorker())(virtualModel.uri)
-  const uri = virtualModel.uri.toString()
-  const diagnostics = [...(await worker.getSyntacticDiagnostics(uri)), ...(await worker.getSemanticDiagnostics(uri))]
+  const uri = virtualModel.uri
+  const worker = await (await monaco.typescript.getTypeScriptWorker())(uri)
   if (version !== checkVersion) return
+  const diagnostics = [
+    ...(await worker.getSyntacticDiagnostics(uri.toString())),
+    ...(await worker.getSemanticDiagnostics(uri.toString())),
+  ]
+  if (version !== checkVersion || !editor) return
 
   const markdownModel = editor.getModel()
   const problems = describeTypeProblems(markdown, mapped, diagnostics, components)
@@ -172,7 +204,7 @@ async function check() {
       range: squiggleRange(problem.span),
       options: {
         className: 'squiggly-error',
-        hoverMessage: { value: problem.message },
+        hoverMessage: { value: typeProblemMarkdown(problem.message) },
         overviewRuler: {
           color: { id: 'editorOverviewRuler.errorForeground' },
           position: monaco.editor.OverviewRulerLane.Right,
